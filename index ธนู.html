@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AR ยิงธนูสู้คำกริยา</title>
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --primary: #4CAF50;
+            --danger: #F44336;
+            --bg-dark: rgba(0, 0, 0, 0.7);
+            --bg-gray: #424242;
+        }
+        * { box-sizing: border-box; font-family: 'Mitr', sans-serif; user-select: none; }
+        body { margin: 0; padding: 0; overflow: hidden; background-color: #000; width: 100vw; height: 100vh; }
+        
+        /* Video and Canvas Layers */
+        #videoElement { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); z-index: 1; }
+        #gameCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
+        
+        /* UI Layer */
+        #uiLayer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
+        .interactive { pointer-events: auto; }
+        
+        /* Screens */
+        .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.85); color: white; transition: opacity 0.3s; z-index: 100; }
+        .hidden { display: none !important; opacity: 0; }
+        
+        h1 { font-size: 3rem; color: #ffeb3b; text-shadow: 2px 2px 4px #000; text-align: center; margin-bottom: 10px; }
+        .instructions { font-size: 1.2rem; background: rgba(255,255,255,0.1); padding: 20px; border-radius: 15px; max-width: 600px; text-align: left; margin-bottom: 20px; line-height: 1.6; }
+        
+        /* Buttons */
+        .btn { padding: 15px 30px; font-size: 1.5rem; border: none; border-radius: 50px; background: var(--primary); color: white; cursor: pointer; box-shadow: 0 6px 0 #2E7D32, 0 10px 10px rgba(0,0,0,0.5); transition: transform 0.1s, box-shadow 0.1s; text-shadow: 1px 1px 2px rgba(0,0,0,0.5); font-weight: 600; }
+        .btn:active { transform: translateY(6px); box-shadow: 0 0px 0 #2E7D32, 0 4px 4px rgba(0,0,0,0.5); }
+        .btn:disabled { background: #757575; box-shadow: 0 6px 0 #424242; cursor: not-allowed; }
+        
+        /* Check List */
+        .check-list { display: flex; flex-direction: column; gap: 15px; margin-bottom: 20px; font-size: 1.2rem; }
+        .check-item { display: flex; align-items: center; gap: 10px; }
+        .spinner { width: 24px; height: 24px; border: 4px solid rgba(255,255,255,0.3); border-top: 4px solid var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+        .icon-check { color: var(--primary); font-size: 1.5rem; font-weight: bold; }
+        .icon-cross { color: var(--danger); font-size: 1.5rem; font-weight: bold; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Game HUD */
+        #hud { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 5px; width: 100%; }
+        .hud-bar { display: flex; justify-content: center; gap: 20px; background: rgba(0,0,0,0.6); padding: 10px 30px; border-radius: 30px; font-size: 1.5rem; color: white; border: 2px solid rgba(255,255,255,0.2); }
+        .hud-item { display: flex; gap: 10px; align-items: center; }
+        .val { font-weight: bold; color: #ffeb3b; }
+        #messageBox { font-size: 1.2rem; padding: 5px 20px; border-radius: 20px; background: rgba(0,0,0,0.5); color: #fff; opacity: 0; transition: opacity 0.2s; text-align: center; }
+        #handStatus { background: rgba(0,0,0,0.5); padding: 5px 15px; border-radius: 15px; font-size: 1rem; color: #ccc; }
+
+        /* Zones */
+        #fruitZone { position: absolute; top: 0; left: 0; width: 25%; height: 100%; border-right: 2px dashed rgba(255,255,255,0.3); background: linear-gradient(to right, rgba(0,0,0,0.2), transparent); }
+        #playerZone { position: absolute; top: 0; right: 0; width: 50%; height: 100%; border-left: 2px dashed rgba(255,255,255,0.1); }
+        .zone-label { position: absolute; bottom: 10px; color: rgba(255,255,255,0.5); font-size: 1rem; width: 100%; text-align: center; }
+
+        /* Charge Bar */
+        #chargeContainer { position: absolute; width: 20px; height: 150px; background: rgba(0,0,0,0.5); border: 2px solid white; border-radius: 10px; overflow: hidden; display: none; transform: translateY(-50%); }
+        #chargeFill { width: 100%; height: 0%; background: linear-gradient(to top, #4CAF50, #FFEB3B, #F44336); position: absolute; bottom: 0; }
+        #chargeText { position: absolute; left: 25px; top: 50%; transform: translateY(-50%); color: white; font-weight: bold; font-size: 1.2rem; text-shadow: 1px 1px 2px black; }
+
+        /* Popups */
+        .popup { position: absolute; font-size: 3rem; font-weight: bold; text-shadow: 2px 2px 4px #000; pointer-events: none; opacity: 1; transform: translate(-50%, -50%); animation: floatUp 1s forwards; z-index: 10; }
+        .popup-green { color: #4CAF50; }
+        .popup-red { color: #F44336; }
+        @keyframes floatUp { 0% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -100px) scale(1.5); } }
+
+        /* Floating Words (2D over 3D) */
+        .fruit-word { position: absolute; font-size: 1.5rem; font-weight: bold; color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.8), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; transform: translate(-50%, -100%); transition: left 0.1s, top 0.1s; z-index: 5; text-align: center; width: 150px; background: rgba(0,0,0,0.3); padding: 2px 10px; border-radius: 10px;}
+
+        /* Side Menu */
+        #sideMenu { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 15px; }
+        .toggle-btn { background: var(--bg-gray); color: white; border: none; padding: 10px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 0 #212121; cursor: pointer; transition: 0.1s; display: flex; flex-direction: column; align-items: center; min-width: 80px; }
+        .toggle-btn.on { background: var(--primary); box-shadow: 0 4px 0 #2E7D32; }
+        .toggle-btn:active { transform: translateY(4px); box-shadow: 0 0px 0 #212121; }
+        .toggle-btn.on:active { box-shadow: 0 0px 0 #2E7D32; }
+
+        /* Credit */
+        #credit { position: absolute; bottom: 10px; right: 10px; font-size: 1rem; color: rgba(255,255,255,0.7); font-weight: 300; background: rgba(0,0,0,0.3); padding: 2px 10px; border-radius: 10px;}
+    </style>
+</head>
+<body>
+
+    <div id="app">
+        <!-- AR Background -->
+        <video id="videoElement" autoplay playsinline></video>
+        <!-- 3D Layer -->
+        <canvas id="gameCanvas"></canvas>
+        
+        <!-- UI Layer -->
+        <div id="uiLayer">
+            <!-- Game Boundaries -->
+            <div id="fruitZone"><div class="zone-label">โซนผลไม้ (ตก)</div></div>
+            <div id="playerZone"><div class="zone-label">โซนผู้เล่น (ยิงธนู)</div></div>
+
+            <!-- HUD -->
+            <div id="hud" class="hidden">
+                <div class="hud-bar">
+                    <div class="hud-item">คะแนน: <span id="scoreVal" class="val">0</span></div>
+                    <div class="hud-item" style="border-left: 2px solid #aaa; padding-left: 20px;">เวลา: <span id="timeVal" class="val">00:00</span></div>
+                    <div class="hud-item" style="border-left: 2px solid #aaa; padding-left: 20px;">ข้อ: <span id="qVal" class="val">0/15</span></div>
+                </div>
+                <div id="messageBox">เริ่มเกม!</div>
+                <div id="handStatus">ซ้าย: รอการตรวจจับ | ขวา: รอการตรวจจับ</div>
+            </div>
+
+            <!-- Charge UI -->
+            <div id="chargeContainer">
+                <div id="chargeFill"></div>
+                <div id="chargeText">0%</div>
+            </div>
+
+            <!-- Container for dynamic text/popups -->
+            <div id="wordsContainer"></div>
+            <div id="popupsContainer"></div>
+
+            <!-- Side Menu -->
+            <div id="sideMenu" class="hidden interactive">
+                <button class="toggle-btn" id="btnSwitchHand">สลับมือ<br><span style="font-size:0.8em;opacity:0.8">(ปิด)</span></button>
+                <button class="toggle-btn on" id="btnShowDots">จุดมือ<br><span style="font-size:0.8em;opacity:0.8">(เปิด)</span></button>
+                <button class="toggle-btn on" id="btnSound">เสียง<br><span style="font-size:0.8em;opacity:0.8">(เปิด)</span></button>
+                <button class="toggle-btn" id="btnRestart" style="background:#F44336;box-shadow: 0 4px 0 #b71c1c;">เริ่มใหม่</button>
+            </div>
+
+            <!-- Credit -->
+            <div id="credit">นายกฤษฎา กุลภา 119</div>
+        </div>
+
+        <!-- Start Screen -->
+        <div id="startScreen" class="screen interactive">
+            <h1>AR ยิงธนูสู้คำกริยา</h1>
+            <div class="instructions">
+                <b>กติกา:</b><br>
+                1. ใช้มือซ้าย (อยู่ในครึ่งจอขวา) เพื่อถือคันธนู<br>
+                2. ใช้มือขวา <b>กำมือ</b> ใกล้คันธนูแล้วดึงเพื่อชาร์จแรงยิง<br>
+                3. <b>แบมือ</b> เพื่อปล่อยลูกธนู<br>
+                4. ยิงเฉพาะ <b>"คำกริยา"</b> ที่ตกลงมาฝั่งซ้ายของจอ (+10 คะแนน)<br>
+                5. ถ้ายิงโดนคำอื่น (-5 คะแนน) หรือปล่อยคำกริยาตกพื้น (-5 คะแนน)
+            </div>
+            
+            <div class="check-list" id="checkList" style="display: none;">
+                <div class="check-item">
+                    <span id="camStatus" class="spinner"></span>
+                    <span>1. เปิดกล้อง</span>
+                </div>
+                <div class="check-item">
+                    <span id="aiStatus" class="spinner"></span>
+                    <span>2. โหลด AI Track มือ</span>
+                </div>
+            </div>
+
+            <button id="btnCheckSystem" class="btn">ตรวจสอบระบบเพื่อเริ่มเกม</button>
+            <button id="btnStartGame" class="btn hidden">เริ่มเกม</button>
+            <div id="errorText" style="color:var(--danger); margin-top: 15px; font-size:1.2rem; display:none;"></div>
+        </div>
+
+        <!-- End Screen -->
+        <div id="endScreen" class="screen hidden interactive">
+            <h1>จบเกม!</h1>
+            <div style="font-size: 2rem; margin-bottom: 20px;">คะแนนรวม: <span id="finalScore" style="color: #ffeb3b; font-size:3rem; font-weight:bold;">0</span></div>
+            <button id="btnPlayAgain" class="btn">เล่นอีกครั้ง</button>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. CONFIG & DATA ---
+        const CONFIG = {
+            maxQuestions: 15,
+            verbs: ["วิ่ง", "กิน", "อ่าน", "เขียน", "นอน", "เดิน", "กระโดด", "ร้อง", "ว่ายน้ำ", "เต้น", "ยิ้ม", "หัวเราะ", "ผลัก", "ดึง", "บิน"],
+            nouns: ["ครู", "บ้าน", "โรงเรียน", "แมว", "หนังสือ", "โต๊ะ", "ดินสอ", "นักเรียน", "ต้นไม้", "รถ", "ปลา", "ข้าว", "เก้าอี้", "กระเป๋า", "คอมพิวเตอร์"],
+            scoreHitVerb: 10,
+            scoreHitNoun: -5,
+            scoreDropVerb: -5,
+            fruitFallSpeed: 0.003, // Normalized screen units per frame
+            drawMaxDistance: 0.3, // Hand distance relative to screen width for 100% power
+            arrowBaseSpeed: 0.02,
+            arrowMaxSpeed: 0.08,
+            gravity: 0.001,
+            aiTimeoutMs: 300 // Time to keep draw state if hand tracking lost
+        };
+
+        // --- 2. AUDIO SYSTEM (Web Audio API) ---
+        class AudioSystem {
+            constructor() {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                this.isMuted = false;
+                this.soundsEnabled = true;
+            }
+            resume() { if (this.ctx.state === 'suspended') this.ctx.resume(); }
+            
+            playTone(freq, type, duration, vol=0.1) {
+                if(this.isMuted || !this.soundsEnabled) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + duration);
+            }
+
+            playSweep(freqStart, freqEnd, duration, vol=0.1) {
+                if(this.isMuted || !this.soundsEnabled) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.frequency.setValueAtTime(freqStart, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(freqEnd, this.ctx.currentTime + duration);
+                gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + duration);
+            }
+
+            // Specific Effects
+            sfxButton() { this.playTone(600, 'sine', 0.1); }
+            sfxToggle() { this.playTone(400, 'square', 0.1); }
+            sfxCheck() { this.playTone(800, 'sine', 0.1); }
+            sfxReady() { this.playSweep(400, 800, 0.3, 0.2); }
+            sfxStartGame() { this.playSweep(500, 1500, 0.5, 0.2); }
+            sfxDrawStart() { this.playTone(200, 'sawtooth', 0.2, 0.05); }
+            sfxCharge(power) { this.playTone(200 + (power * 400), 'sawtooth', 0.1, 0.05); } // Pitch goes up with power
+            sfxRelease() { this.playSweep(1000, 200, 0.3, 0.2); }
+            sfxLowPower() { this.playTone(150, 'triangle', 0.3, 0.2); }
+            sfxHitVerb() { this.playSweep(600, 1200, 0.4, 0.3); this.playTone(1200, 'sine', 0.4, 0.3); } // Happy
+            sfxHitNoun() { this.playTone(200, 'sawtooth', 0.4, 0.3); this.playSweep(300, 100, 0.4, 0.3); } // Sad
+            sfxDropVerb() { this.playSweep(400, 150, 0.5, 0.3); }
+            sfxHitEdge() { this.playTone(100, 'square', 0.1, 0.2); }
+            sfxNextQ() { this.playTone(800, 'sine', 0.2, 0.1); }
+            sfxGameOver() { this.playSweep(800, 1600, 1.0, 0.3); }
+        }
+        const audio = new AudioSystem();
+
+        // --- 3. UTILITIES & DOM ---
+        const $ = id => document.getElementById(id);
+        const randRange = (min, max) => Math.random() * (max - min) + min;
+        
+        function showMsg(text, type='normal') {
+            const msgBox = $('messageBox');
+            msgBox.innerText = text;
+            msgBox.style.color = type === 'good' ? '#4CAF50' : type === 'bad' ? '#F44336' : '#fff';
+            msgBox.style.opacity = 1;
+            if(window.msgTimeout) clearTimeout(window.msgTimeout);
+            window.msgTimeout = setTimeout(() => msgBox.style.opacity = 0, 2000);
+        }
+
+        function createPopup(text, x, y, type) {
+            const p = document.createElement('div');
+            p.className = `popup popup-${type}`;
+            p.innerText = text;
+            p.style.left = `${x}px`;
+            p.style.top = `${y}px`;
+            $('popupsContainer').appendChild(p);
+            setTimeout(() => p.remove(), 1000);
+        }
+
+        // --- 4. THREE.JS WORLD ---
+        class GameWorld {
+            constructor() {
+                this.scene = new THREE.Scene();
+                // Use Orthographic camera to map 1:1 with screen pixels easier
+                this.camera = new THREE.OrthographicCamera(0, window.innerWidth, 0, window.innerHeight, 0.1, 1000);
+                this.camera.position.z = 100;
+
+                this.renderer = new THREE.WebGLRenderer({ canvas: $('gameCanvas'), alpha: true, antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+
+                // Lighting
+                const light = new THREE.DirectionalLight(0xffffff, 1);
+                light.position.set(0, 0, 1);
+                this.scene.add(light);
+                this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+                // Arrays for objects
+                this.fruits = [];
+                this.arrows = [];
+                this.handDots = { left: [], right: [] };
+
+                this.createBow();
+                this.createHandDots();
+                
+                window.addEventListener('resize', () => this.onResize());
+            }
+
+            onResize() {
+                this.camera.right = window.innerWidth;
+                this.camera.bottom = window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            createBow() {
+                this.bowGroup = new THREE.Group();
+                
+                // Bow Arc (Torus segment)
+                const geometry = new THREE.TorusGeometry(80, 5, 16, 32, Math.PI);
+                const material = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
+                const arc = new THREE.Mesh(geometry, material);
+                arc.rotation.z = Math.PI / 2; // Vertical
+                arc.position.x = 40; // Offset so grip is at origin
+                this.bowGroup.add(arc);
+
+                // Bow Grip
+                const gripGeo = new THREE.CylinderGeometry(8, 8, 40, 16);
+                const gripMat = new THREE.MeshPhongMaterial({ color: 0x3e2723 });
+                const grip = new THREE.Mesh(gripGeo, gripMat);
+                this.bowGroup.add(grip);
+
+                // String (Line)
+                const stringMat = new THREE.LineBasicMaterial({ color: 0xffffff });
+                this.stringGeo = new THREE.BufferGeometry();
+                // 3 points: top, pull point, bottom
+                const positions = new Float32Array([
+                    0, 80, 0,
+                    0, 0, 0,
+                    0, -80, 0
+                ]);
+                this.stringGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                this.stringLine = new THREE.Line(this.stringGeo, stringMat);
+                this.bowGroup.add(this.stringLine);
+
+                // Dummy arrow for drawing
+                this.dummyArrow = this.createArrowMesh();
+                this.dummyArrow.visible = false;
+                this.bowGroup.add(this.dummyArrow);
+
+                this.scene.add(this.bowGroup);
+                this.bowGroup.visible = false; // Hide until game starts
+            }
+
+            updateString(pullDist, pullAngle) {
+                const positions = this.stringGeo.attributes.position.array;
+                // Top point is fixed at (0, 80, 0) relative to bow
+                // Bottom point is fixed at (0, -80, 0)
+                
+                // Pull point moves back based on dist and angle
+                const px = -pullDist * Math.cos(pullAngle);
+                const py = pullDist * Math.sin(pullAngle);
+                
+                positions[3] = px; // x
+                positions[4] = py; // y
+                this.stringGeo.attributes.position.needsUpdate = true;
+
+                if(pullDist > 0) {
+                    this.dummyArrow.visible = true;
+                    this.dummyArrow.position.set(px, py, 0);
+                    // Point opposite to pull
+                    this.dummyArrow.rotation.z = pullAngle;
+                } else {
+                    this.dummyArrow.visible = false;
+                }
+            }
+
+            createArrowMesh() {
+                const group = new THREE.Group();
+                // Shaft
+                const shaftGeo = new THREE.CylinderGeometry(2, 2, 80);
+                const shaftMat = new THREE.MeshPhongMaterial({ color: 0xd7ccc8 });
+                const shaft = new THREE.Mesh(shaftGeo, shaftMat);
+                shaft.rotation.z = Math.PI / 2;
+                shaft.position.x = 40;
+                group.add(shaft);
+                // Head
+                const headGeo = new THREE.ConeGeometry(5, 15, 4);
+                const headMat = new THREE.MeshPhongMaterial({ color: 0x9e9e9e });
+                const head = new THREE.Mesh(headGeo, headMat);
+                head.rotation.z = -Math.PI / 2;
+                head.position.x = 80;
+                group.add(head);
+                // Feathers
+                const fGeo = new THREE.BoxGeometry(10, 10, 1);
+                const fMat = new THREE.MeshPhongMaterial({ color: 0xf44336 });
+                const f1 = new THREE.Mesh(fGeo, fMat);
+                f1.position.x = 5;
+                group.add(f1);
+                return group;
+            }
+
+            fireArrow(pos, velocity, angle) {
+                const arrow = this.createArrowMesh();
+                arrow.position.copy(pos);
+                arrow.rotation.z = angle;
+                this.scene.add(arrow);
+                this.arrows.push({
+                    mesh: arrow,
+                    vel: velocity.clone(),
+                    state: 'flying', // flying, pinned_wall, pinned_fruit, fading
+                    timer: 0
+                });
+            }
+
+            spawnFruits(wordList) {
+                // Clear old fruits properly from the scene
+                this.fruits.forEach(f => {
+                    this.scene.remove(f.mesh);
+                    if(f.labelDom) f.labelDom.remove();
+                });
+                
+                $('wordsContainer').innerHTML = '';
+                this.fruits = [];
+
+                const colors = [0xFF5722, 0x9C27B0, 0x03A9F4];
+                const zones = [0.05, 0.12, 0.20]; // X positions in left 25% (normalized)
+                
+                // Shuffle zones
+                zones.sort(() => Math.random() - 0.5);
+
+                wordList.forEach((item, i) => {
+                    const geo = new THREE.SphereGeometry(25, 32, 32);
+                    const mat = new THREE.MeshPhongMaterial({ color: colors[i] });
+                    const mesh = new THREE.Mesh(geo, mat);
+                    
+                    const screenX = zones[i] * window.innerWidth;
+                    const screenY = -50 - (Math.random() * 100); // Start above screen
+                    
+                    mesh.position.set(screenX, screenY, 0);
+                    this.scene.add(mesh);
+
+                    // Create HTML Label
+                    const label = document.createElement('div');
+                    label.className = 'fruit-word';
+                    label.innerText = item.word;
+                    $('wordsContainer').appendChild(label);
+
+                    this.fruits.push({
+                        mesh: mesh,
+                        labelDom: label,
+                        data: item,
+                        state: 'falling', // falling, pinned_arrow
+                        x: screenX,
+                        y: screenY,
+                        speed: CONFIG.fruitFallSpeed * window.innerHeight + (Math.random() * 1)
+                    });
+                });
+            }
+
+            createHandDots() {
+                const matL = new THREE.MeshBasicMaterial({ color: 0x4CAF50 });
+                const matR = new THREE.MeshBasicMaterial({ color: 0x2196F3 });
+                const geo = new THREE.SphereGeometry(3, 8, 8);
+                
+                for(let i=0; i<21; i++) {
+                    let dL = new THREE.Mesh(geo, matL);
+                    let dR = new THREE.Mesh(geo, matR);
+                    dL.visible = false; dR.visible = false;
+                    this.scene.add(dL); this.scene.add(dR);
+                    this.handDots.left.push(dL);
+                    this.handDots.right.push(dR);
+                }
+            }
+
+            updateHandDots(landmarks, isLeft, show) {
+                const dots = isLeft ? this.handDots.left : this.handDots.right;
+                for(let i=0; i<21; i++) {
+                    if(landmarks && show) {
+                        dots[i].visible = true;
+                        dots[i].position.set(
+                            (1 - landmarks[i].x) * window.innerWidth, // Mirror X
+                            landmarks[i].y * window.innerHeight,
+                            0
+                        );
+                    } else {
+                        dots[i].visible = false;
+                    }
+                }
+            }
+
+            render() {
+                this.renderer.render(this.scene, this.camera);
+            }
+            
+            clearScene() {
+                this.fruits.forEach(f => { this.scene.remove(f.mesh); if(f.labelDom) f.labelDom.remove(); });
+                this.arrows.forEach(a => this.scene.remove(a.mesh));
+                this.fruits = [];
+                this.arrows = [];
+                this.bowGroup.visible = false;
+            }
+        }
+
+        // --- 5. HAND TRACKING ---
+        class HandTracker {
+            constructor() {
+                this.video = $('videoElement');
+                this.hands = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+                });
+                
+                this.hands.setOptions({
+                    maxNumHands: 2,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.6,
+                    minTrackingConfidence: 0.6
+                });
+
+                this.camera = new Camera(this.video, {
+                    onFrame: async () => { await this.hands.send({image: this.video}); },
+                    width: 640, height: 480
+                });
+
+                this.leftHand = null;
+                this.rightHand = null;
+                this.swapHands = false;
+
+                this.hands.onResults((res) => this.onResults(res));
+                this.onReadyCallback = null;
+            }
+
+            async startCheck(onReady, onError) {
+                this.onReadyCallback = onReady;
+                try {
+                    await this.camera.start();
+                    // Camera is ready
+                    $('camStatus').className = 'icon-check';
+                    $('camStatus').innerText = '✓';
+                    audio.sfxCheck();
+                } catch(e) {
+                    onError("ไม่สามารถเข้าถึงกล้องได้ กรุณาอนุญาตให้เว็บเบราว์เซอร์ใช้กล้อง");
+                }
+            }
+
+            onResults(results) {
+                // If it's the first result, AI is ready
+                if(this.onReadyCallback) {
+                    $('aiStatus').className = 'icon-check';
+                    $('aiStatus').innerText = '✓';
+                    audio.sfxReady();
+                    this.onReadyCallback();
+                    this.onReadyCallback = null;
+                }
+
+                let left = null, right = null;
+
+                if (results.multiHandLandmarks && results.multiHandedness) {
+                    for (let i = 0; i < results.multiHandedness.length; i++) {
+                        let classification = results.multiHandedness[i].label;
+                        // MediaPipe camera is mirrored, so 'Right' label is actually user's Left hand.
+                        // However, let's allow manual swap if it fails.
+                        let isLeft = classification === 'Right'; 
+                        if(this.swapHands) isLeft = !isLeft;
+
+                        const landmarks = results.multiHandLandmarks[i];
+                        if(isLeft) left = landmarks;
+                        else right = landmarks;
+                    }
+                }
+                this.leftHand = left;
+                this.rightHand = right;
+            }
+
+            getGesture(landmarks) {
+                if(!landmarks) return 'none';
+                // Simple gesture heuristic based on distance from wrist(0) to fingertips(8,12,16,20)
+                const wrist = landmarks[0];
+                let distTotal = 0;
+                const tips = [8, 12, 16, 20];
+                tips.forEach(tip => {
+                    let dx = landmarks[tip].x - wrist.x;
+                    let dy = landmarks[tip].y - wrist.y;
+                    distTotal += Math.sqrt(dx*dx + dy*dy);
+                });
+                
+                // Normal distance for open hand is ~1.5 - 2.0. Fist is < 0.6
+                if(distTotal < 0.8) return 'fist';
+                if(distTotal > 1.5) return 'open';
+                return 'partial';
+            }
+
+            getHandPosScreen(landmarks, index=0) {
+                if(!landmarks) return null;
+                // Mirror X
+                return {
+                    x: (1 - landmarks[index].x) * window.innerWidth,
+                    y: landmarks[index].y * window.innerHeight
+                };
+            }
+        }
+
+        // --- 6. GAME CONTROLLER ---
+        class Game {
+            constructor() {
+                this.world = new GameWorld();
+                this.tracker = new HandTracker();
+                
+                this.state = 'init'; // init, playing, end
+                this.score = 0;
+                this.timeStart = 0;
+                this.questionIndex = 0;
+                
+                this.settings = { showDots: true, sound: true };
+                
+                // Bow & Draw Mechanics
+                this.isDrawing = false;
+                this.drawPower = 0; // 0 to 1
+                this.lastDrawPos = null;
+                this.lastDrawTime = 0;
+                this.bowAngle = 0;
+
+                // Mouse / Touch Fallback
+                this.isMouseDrawing = false;
+                this.mousePos = {x: 0, y: 0};
+
+                this.setupUI();
+            }
+
+            setupUI() {
+                $('btnCheckSystem').onclick = () => {
+                    audio.resume();
+                    audio.sfxButton();
+                    $('btnCheckSystem').style.display = 'none';
+                    $('checkList').style.display = 'flex';
+                    this.tracker.startCheck(
+                        () => { $('btnStartGame').classList.remove('hidden'); },
+                        (err) => { $('errorText').innerText = err; $('errorText').style.display = 'block'; }
+                    );
+                };
+
+                $('btnStartGame').onclick = () => { audio.sfxStartGame(); this.startGame(); };
+                $('btnPlayAgain').onclick = () => { audio.sfxButton(); this.startGame(); };
+
+                // Toggles
+                const toggle = (btnId, prop, cb) => {
+                    $(btnId).onclick = () => {
+                        audio.sfxToggle();
+                        this.settings[prop] = !this.settings[prop];
+                        if(this.settings[prop]) {
+                            $(btnId).classList.add('on');
+                            $(btnId).querySelector('span').innerText = '(เปิด)';
+                        } else {
+                            $(btnId).classList.remove('on');
+                            $(btnId).querySelector('span').innerText = '(ปิด)';
+                        }
+                        if(cb) cb(this.settings[prop]);
+                    }
+                };
+
+                toggle('btnShowDots', 'showDots');
+                toggle('btnSound', 'sound', (val) => audio.soundsEnabled = val);
+                
+                $('btnSwitchHand').onclick = () => {
+                    audio.sfxToggle();
+                    this.tracker.swapHands = !this.tracker.swapHands;
+                    let on = this.tracker.swapHands;
+                    $('btnSwitchHand').classList.toggle('on', on);
+                    $('btnSwitchHand').querySelector('span').innerText = on ? '(เปิด)' : '(ปิด)';
+                };
+
+                $('btnRestart').onclick = () => { audio.sfxButton(); this.startGame(); };
+
+                // Mouse/Touch controls for playing without camera
+                window.addEventListener('pointerdown', (e) => {
+                    if (this.state !== 'playing') return;
+                    // Only allow drawing if clicking on the right side of the screen
+                    if (e.clientX > window.innerWidth / 2) {
+                        this.isMouseDrawing = true;
+                        this.mousePos = { x: e.clientX, y: e.clientY };
+                        audio.sfxDrawStart();
+                    }
+                });
+
+                window.addEventListener('pointermove', (e) => {
+                    if (this.isMouseDrawing) {
+                        this.mousePos = { x: e.clientX, y: e.clientY };
+                    }
+                });
+
+                window.addEventListener('pointerup', (e) => {
+                    if (this.isMouseDrawing) {
+                        this.releaseArrow();
+                        this.isMouseDrawing = false;
+                    }
+                });
+            }
+
+            startGame() {
+                $('startScreen').classList.add('hidden');
+                $('endScreen').classList.add('hidden');
+                $('hud').classList.remove('hidden');
+                $('sideMenu').classList.remove('hidden');
+                
+                this.state = 'playing';
+                this.score = 0;
+                this.questionIndex = 0;
+                this.timeStart = Date.now();
+                this.world.clearScene();
+                this.world.bowGroup.visible = true;
+                
+                this.updateHUD();
+                this.nextQuestion();
+                
+                if(!this.loopRunning) {
+                    this.loopRunning = true;
+                    this.gameLoop();
+                }
+            }
+
+            nextQuestion() {
+                if(this.questionIndex >= CONFIG.maxQuestions) {
+                    this.endGame();
+                    return;
+                }
+                this.questionIndex++;
+                this.updateHUD();
+                audio.sfxNextQ();
+
+                // Generate 3 words: 1 verb, 2 nouns
+                let qVerbs = [...CONFIG.verbs].sort(()=>Math.random()-0.5);
+                let qNouns = [...CONFIG.nouns].sort(()=>Math.random()-0.5);
+                
+                let words = [
+                    { word: qVerbs[0], type: 'verb' },
+                    { word: qNouns[0], type: 'noun' },
+                    { word: qNouns[1], type: 'noun' }
+                ];
+                
+                this.world.spawnFruits(words);
+                showMsg('ยิงคำกริยา!', 'normal');
+            }
+
+            endGame() {
+                this.state = 'end';
+                $('hud').classList.add('hidden');
+                $('sideMenu').classList.add('hidden');
+                $('endScreen').classList.remove('hidden');
+                $('finalScore').innerText = this.score;
+                this.world.clearScene();
+                audio.sfxGameOver();
+            }
+
+            addScore(pts, x, y) {
+                this.score += pts;
+                if(this.score < 0) this.score = 0;
+                this.updateHUD();
+                
+                const type = pts > 0 ? 'green' : 'red';
+                const sign = pts > 0 ? '+' : '';
+                createPopup(`${sign}${pts}`, x, y, type);
+            }
+
+            updateHUD() {
+                $('scoreVal').innerText = this.score;
+                $('qVal').innerText = `${this.questionIndex}/${CONFIG.maxQuestions}`;
+            }
+
+            gameLoop() {
+                if(this.state !== 'playing') {
+                    this.loopRunning = false;
+                    return;
+                }
+                requestAnimationFrame(() => this.gameLoop());
+
+                // Update Time
+                const dt = Math.floor((Date.now() - this.timeStart)/1000);
+                const min = String(Math.floor(dt/60)).padStart(2, '0');
+                const sec = String(dt%60).padStart(2, '0');
+                $('timeVal').innerText = `${min}:${sec}`;
+
+                // Process Hands
+                this.processHands();
+                
+                // Update Physics
+                this.updatePhysics();
+                
+                // Render
+                this.world.render();
+            }
+
+            processHands() {
+                const hL = this.tracker.leftHand;
+                const hR = this.tracker.rightHand;
+                
+                this.world.updateHandDots(hL, true, this.settings.showDots);
+                this.world.updateHandDots(hR, false, this.settings.showDots);
+
+                // Update Status Text
+                const lStat = hL ? 'เจอ' : 'ไม่เจอ';
+                const rGes = this.tracker.getGesture(hR);
+                const rStat = !hR ? 'ไม่เจอ' : (rGes === 'fist' ? 'กำมือ' : (rGes === 'open' ? 'แบมือ' : 'กึ่งแบ'));
+                $('handStatus').innerText = `มือซ้าย: ${lStat} | มือขวา: ${rStat}`;
+
+                const bowGroup = this.world.bowGroup;
+                const minRightX = window.innerWidth / 2;
+                const W = window.innerWidth;
+                const H = window.innerHeight;
+
+                // 1. Position Bow (Left Hand or Fallback)
+                if(hL) {
+                    let pL = this.tracker.getHandPosScreen(hL, 0); // wrist
+                    // Clamp bow to right side only (X > center)
+                    pL.x = Math.max(pL.x, minRightX);
+                    
+                    // Smooth movement
+                    bowGroup.position.x += (pL.x - bowGroup.position.x) * 0.2;
+                    bowGroup.position.y += (pL.y - bowGroup.position.y) * 0.2;
+                } else {
+                    // Fallback position if no left hand
+                    bowGroup.position.x += ((W * 0.7) - bowGroup.position.x) * 0.1;
+                    bowGroup.position.y += ((H * 0.5) - bowGroup.position.y) * 0.1;
+                }
+
+                // 2. Draw & Shoot Logic (Right Hand or Mouse)
+                if (this.isMouseDrawing) {
+                    this.isDrawing = true;
+                    let dx = this.mousePos.x - bowGroup.position.x;
+                    let dy = this.mousePos.y - bowGroup.position.y;
+                    let dist = Math.sqrt(dx*dx + dy*dy);
+                    this.bowAngle = Math.atan2(dy, dx);
+                    
+                    bowGroup.rotation.z = this.bowAngle + Math.PI;
+
+                    const maxDistPixels = window.innerWidth * CONFIG.drawMaxDistance;
+                    this.drawPower = Math.min(dist / maxDistPixels, 1.0);
+                    if(this.drawPower < 0.1) this.drawPower = 0;
+
+                    this.world.updateString(Math.min(dist, 150), 0);
+                    
+                    if(Math.random() < 0.1 && this.drawPower > 0.2) audio.sfxCharge(this.drawPower);
+
+                } else if(hR) {
+                    let pR = this.tracker.getHandPosScreen(hR, 9); // middle knuckle for drawing point
+                    
+                    if(rGes === 'fist') {
+                        if(!this.isDrawing) {
+                            this.isDrawing = true;
+                            audio.sfxDrawStart();
+                        }
+                        
+                        // Calculate draw vector from Bow to Right Hand
+                        let dx = pR.x - bowGroup.position.x;
+                        let dy = pR.y - bowGroup.position.y;
+                        let dist = Math.sqrt(dx*dx + dy*dy);
+                        this.bowAngle = Math.atan2(dy, dx);
+                        
+                        // Look at right hand, but bow mesh should face opposite (towards left)
+                        bowGroup.rotation.z = this.bowAngle + Math.PI;
+
+                        // Power calculation based on screen width percentage
+                        const maxDistPixels = window.innerWidth * CONFIG.drawMaxDistance;
+                        this.drawPower = Math.min(dist / maxDistPixels, 1.0);
+                        
+                        // Dead zone
+                        if(this.drawPower < 0.1) this.drawPower = 0;
+
+                        // Update visuals
+                        this.world.updateString(Math.min(dist, 150), 0); // Local to bow
+                        this.lastDrawPos = pR;
+                        this.lastDrawTime = Date.now();
+                        
+                        // Sound feedback while drawing
+                        if(Math.random() < 0.1 && this.drawPower > 0.2) audio.sfxCharge(this.drawPower);
+                        
+                    } else if (rGes === 'open' && this.isDrawing) {
+                        this.releaseArrow();
+                    } else if (rGes === 'partial' && this.isDrawing) {
+                        // Wait, don't drop
+                        this.lastDrawTime = Date.now(); 
+                    }
+                } else if (!this.isMouseDrawing) {
+                    // Hand lost. AI Track drop protection
+                    if(this.isDrawing) {
+                        if(Date.now() - this.lastDrawTime > CONFIG.aiTimeoutMs) {
+                            // Cancel draw
+                            this.isDrawing = false;
+                            this.drawPower = 0;
+                            this.world.updateString(0, 0);
+                        }
+                    }
+                }
+
+                this.updateChargeUI();
+            }
+
+            updateChargeUI() {
+                const c = $('chargeContainer');
+                if(this.isDrawing && this.drawPower > 0) {
+                    c.style.display = 'block';
+                    c.style.left = (this.world.bowGroup.position.x - 40) + 'px';
+                    c.style.top = this.world.bowGroup.position.y + 'px';
+                    
+                    let pct = Math.floor(this.drawPower * 100);
+                    $('chargeFill').style.height = `${pct}%`;
+                    $('chargeText').innerText = `${pct}%`;
+                } else {
+                    c.style.display = 'none';
+                }
+            }
+
+            releaseArrow() {
+                this.isDrawing = false;
+                this.world.updateString(0, 0); // reset string
+
+                if(this.drawPower < 0.15) {
+                    audio.sfxLowPower();
+                    showMsg('ดึงแรงไม่พอ', 'bad');
+                    this.drawPower = 0;
+                    return;
+                }
+
+                audio.sfxRelease();
+                
+                // Calculate velocity vector
+                // Arrow points opposite to right hand pull
+                const speed = CONFIG.arrowBaseSpeed + (this.drawPower * (CONFIG.arrowMaxSpeed - CONFIG.arrowBaseSpeed));
+                const fireAngle = this.world.bowGroup.rotation.z; // Bow points left
+
+                const vel = new THREE.Vector3(
+                    Math.cos(fireAngle) * speed * window.innerWidth,
+                    Math.sin(fireAngle) * speed * window.innerHeight,
+                    0
+                );
+
+                this.world.fireArrow(this.world.bowGroup.position, vel, fireAngle);
+                
+                this.drawPower = 0;
+            }
+
+            updatePhysics() {
+                const W = window.innerWidth;
+                const H = window.innerHeight;
+
+                // 1. Update Fruits
+                let allFruitsDone = true;
+                this.world.fruits.forEach(f => {
+                    if(f.state === 'falling') {
+                        allFruitsDone = false;
+                        f.y += f.speed;
+                        f.mesh.position.y = f.y;
+                        
+                        // Sync 2D label
+                        if(f.labelDom) {
+                            f.labelDom.style.left = f.x + 'px';
+                            f.labelDom.style.top = (f.y - 30) + 'px';
+                        }
+
+                        // Bottom screen hit
+                        if(f.y > H + 50) {
+                            f.state = 'done';
+                            f.mesh.visible = false;
+                            if(f.labelDom) f.labelDom.style.display = 'none';
+                            
+                            if(f.data.type === 'verb') {
+                                this.addScore(CONFIG.scoreHitNoun, f.x, H - 50); // Same penalty logic
+                                showMsg('-5 คำกริยาตกพื้น', 'bad');
+                                audio.sfxDropVerb();
+                                setTimeout(() => this.nextQuestion(), 1000);
+                            }
+                        }
+                    } else if (f.state === 'pinned_arrow') {
+                        // Managed by arrow
+                        if(f.labelDom) {
+                            f.labelDom.style.left = f.mesh.position.x + 'px';
+                            f.labelDom.style.top = (f.mesh.position.y - 30) + 'px';
+                        }
+                    }
+                });
+
+                // 2. Update Arrows
+                this.world.arrows.forEach((a, index) => {
+                    if(a.state === 'flying') {
+                        // Apply gravity
+                        a.vel.y += CONFIG.gravity * H;
+                        
+                        a.mesh.position.x += a.vel.x;
+                        a.mesh.position.y += a.vel.y;
+                        
+                        // Face velocity direction
+                        a.mesh.rotation.z = Math.atan2(a.vel.y, a.vel.x);
+
+                        // Check collision with fruits
+                        this.world.fruits.forEach(f => {
+                            if(f.state === 'falling') {
+                                let dx = a.mesh.position.x - f.mesh.position.x;
+                                let dy = a.mesh.position.y - f.mesh.position.y;
+                                let dist = Math.sqrt(dx*dx + dy*dy);
+                                
+                                if(dist < 40) { // Hit radius
+                                    this.handleHit(a, f);
+                                }
+                            }
+                        });
+
+                        // Bounds check (Screen Edge)
+                        if(a.mesh.position.x < 0 || a.mesh.position.y > H || a.mesh.position.y < 0) {
+                            a.state = 'pinned_wall';
+                            a.timer = 60; // frames to wait before fade
+                            audio.sfxHitEdge();
+                            
+                            // Check if arrow carries a verb to trigger next level
+                            if(a.carriedFruit && a.carriedFruit.data.type === 'verb') {
+                                setTimeout(() => this.nextQuestion(), 1000);
+                            }
+                        }
+
+                    } else if (a.state === 'pinned_wall') {
+                        a.timer--;
+                        if(a.timer <= 0) {
+                            a.state = 'fading';
+                        }
+                    } else if (a.state === 'fading') {
+                        // Remove arrow and carried fruit completely from the scene
+                        this.world.scene.remove(a.mesh);
+                        if(a.carriedFruit) {
+                            this.world.scene.remove(a.carriedFruit.mesh);
+                            if(a.carriedFruit.labelDom) a.carriedFruit.labelDom.remove();
+                        }
+                    }
+                });
+
+                // Clean up faded arrows
+                this.world.arrows = this.world.arrows.filter(a => a.state !== 'fading');
+            }
+
+            handleHit(arrow, fruit) {
+                arrow.state = 'flying'; // Keep flying but carry fruit
+                arrow.carriedFruit = fruit;
+                fruit.state = 'pinned_arrow';
+                
+                // Attach fruit to arrow tip
+                fruit.mesh.position.copy(arrow.mesh.position);
+                // Slight adjustment so it looks pierced
+                fruit.mesh.position.x += Math.cos(arrow.mesh.rotation.z) * 40;
+                fruit.mesh.position.y += Math.sin(arrow.mesh.rotation.z) * 40;
+                
+                // Add fruit weight to arrow (slow down)
+                arrow.vel.x *= 0.5;
+                arrow.vel.y *= 0.5;
+
+                if(fruit.data.type === 'verb') {
+                    this.addScore(CONFIG.scoreHitVerb, fruit.mesh.position.x, fruit.mesh.position.y);
+                    showMsg('+10 ถูกต้อง!', 'good');
+                    audio.sfxHitVerb();
+                } else {
+                    this.addScore(CONFIG.scoreHitNoun, fruit.mesh.position.x, fruit.mesh.position.y);
+                    showMsg('-5 คำหลอก', 'bad');
+                    audio.sfxHitNoun();
+                    // If hit noun, remove from scene immediately
+                    this.world.scene.remove(fruit.mesh);
+                    if(fruit.labelDom) fruit.labelDom.remove();
+                    fruit.state = 'done'; // Prevent further updates
+                    arrow.carriedFruit = null; // Detach
+                }
+            }
+        }
+
+        window.onload = () => {
+            const game = new Game();
+        };
+
+    </script>
+</body>
+</html>
